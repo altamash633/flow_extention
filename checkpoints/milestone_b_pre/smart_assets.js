@@ -1,5 +1,5 @@
 // ==========================================
-// PHASE 0: RUNTIME INSTRUMENTATION V2 (DEBUG ONLY)
+// PHASE 0: RUNTIME INSTRUMENTATION V2
 // ==========================================
 
 window.__SA_FLAGS = {
@@ -15,11 +15,9 @@ window.__saMetrics = {
     uploadTime: 0,
     renderTime: 0,
     listenerCount: 0,
-    queueLength: 0,
-    queueWaitTime: 0
+    queueLength: 0
 };
 
-// Diagnostics, validations, wrappers and dashboards are bound strictly to DEBUG_MODE (Goal 4 & Safe Mode)
 if (window.DEBUG_MODE === true) {
     // 1. Memory Monitor
     setInterval(() => {
@@ -44,7 +42,7 @@ if (window.DEBUG_MODE === true) {
         return _originalAddEventListener.apply(this, arguments);
     };
 
-    // 3. __saUploadHandler Tracer (Proxies timing metadata directly to diagnostics)
+    // 3. __saUploadHandler Tracer
     let _originalUploadHandler = null;
     Object.defineProperty(window, '__saUploadHandler', {
         get() {
@@ -102,7 +100,7 @@ if (window.DEBUG_MODE === true) {
         configurable: true
     });
 
-    // 4. Runtime Validator (Continuous integrity check)
+    // 4. Runtime Validator (Continuous)
     setInterval(() => {
         let failed = false;
         let reason = "";
@@ -121,7 +119,7 @@ if (window.DEBUG_MODE === true) {
         }
     }, 2000);
 
-    // 5. Live Metrics Dashboard UI Panel
+    // 5. Live Metrics Dashboard
     const saMetricsPanel = document.createElement('div');
     saMetricsPanel.id = "sa-metrics-panel";
     saMetricsPanel.style.position = "fixed";
@@ -135,16 +133,16 @@ if (window.DEBUG_MODE === true) {
     document.body.appendChild(saMetricsPanel);
 
     setInterval(() => {
-        if (window.__saUploadQueue) {
-            window.__saMetrics.queueLength = window.__saUploadQueue.length;
+        if (window.__saPromptQueue) {
+            window.__saMetrics.queueLength = window.__saPromptQueue.length;
         }
         saMetricsPanel.innerHTML = `
             <b>LIVE METRICS</b><br>
             Parse: ${window.__saMetrics.parseTime}ms<br>
             Resolve: ${window.__saMetrics.resolveTime}ms<br>
             Upload: ${window.__saMetrics.uploadTime}ms<br>
-            Queue Wait: ${window.__saMetrics.queueWaitTime || 0}ms<br>
-            Queue Length: ${window.__saMetrics.queueLength}<br>
+            Render: ${window.__saMetrics.renderTime}ms<br>
+            Queue: ${window.__saMetrics.queueLength}<br>
             Listeners: ${window.__saMetrics.listenerCount}<br>
             Memory: ${window.__saMetrics.memoryUsed || 'N/A'}
         `;
