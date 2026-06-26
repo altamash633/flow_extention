@@ -294,44 +294,19 @@ document.addEventListener('keyup', (e) => {
     }
 });
 
-// Prompt cache to hold resolved states and upload statuses (Goal 2: Resolve assets exactly once)
-// Key: prompt text. Value: { resolved: promptObject, uploaded: boolean, uploading: boolean }
-window.__saPromptCache = window.__saPromptCache || new Map();
-window.__saUploadQueue = window.__saUploadQueue || [];
-let isProcessingQueue = false;
-
 async function executePipeline(e, fullText, index) {
-    const parseStart = window.DEBUG_MODE === true ? performance.now() : 0;
     const prompts = fullText.split(/\n\s*\n/).map(s => s.trim()).filter(s => s.length > 0);
     
-    // Create a set of current prompts to clean up the cache (Goal 5: Bounded active memory)
-    const currentPrompts = new Set(prompts);
-    for (const cachedPrompt of window.__saPromptCache.keys()) {
-        if (!currentPrompts.has(cachedPrompt)) {
-            window.__saPromptCache.delete(cachedPrompt);
-        }
-    }
-
-    // Goal 5: Synchronize prompt queue state with current textarea prompts
+    // Clear out for this session
+    window.__saResolvedAssets = [];
     window.__saPromptQueue = prompts;
-
-    let resolveDuration = 0;
     
-    // Parse and Resolve Phase
+    let devHtml = '';
+
+    // Parse Phase
     for (let pIdx = 0; pIdx < prompts.length; pIdx++) {
         const pNum = pIdx + 1;
         const pText = prompts[pIdx];
-        
-        // Goal 2: Every prompt resolves assets exactly once. Reuse cache if present.
-        if (window.__saPromptCache.has(pText)) {
-            const cacheEntry = window.__saPromptCache.get(pText);
-            // Update the index number dynamically since order of prompts in textarea might shift
-            cacheEntry.resolved.promptIndex = pNum;
-            continue;
-        }
-
-        const resolveStart = window.DEBUG_MODE === true ? performance.now() : 0;
-        
         const promptObject = {
             promptIndex: pNum,
             promptText: pText,
@@ -379,42 +354,18 @@ async function executePipeline(e, fullText, index) {
             }
         });
         
-        if (window.DEBUG_MODE === true) {
-            resolveDuration += (performance.now() - resolveStart);
+        window.__saResolvedAssets.push(promptObject);
+        
+        devHtml += `<div style="margin-bottom:12px;">`;
+        devHtml += `<div style="color:#fff;font-weight:bold;">Prompt ${pNum}</div>`;
+        
+        const allMatched = [...promptObject.characters, ...promptObject.backgrounds, ...promptObject.props];
+        if (allMatched.length > 0) {
+            allMatched.forEach(m => { devHtml += `<div style="color:#28a745">✓ ${m}</div>`; });
+        } else {
+            devHtml += `<div style="color:#999">No assets</div>`;
         }
-
-        // Cache the newly resolved prompt (Goal 2: Immutable after completion)
-        window.__saPromptCache.set(pText, {
-            resolved: promptObject,
-            uploaded: false,
-            uploading: false
-        });
-    }
-    
-    // Sync resolved assets array (for legacy diagnostics)
-    window.__saResolvedAssets = [];
-    let devHtml = '';
-    for (let pIdx = 0; pIdx < prompts.length; pIdx++) {
-        const pText = prompts[pIdx];
-        const cacheEntry = window.__saPromptCache.get(pText);
-        if (cacheEntry) {
-            window.__saResolvedAssets.push(cacheEntry.resolved);
-            
-            devHtml += `<div style="margin-bottom:12px;">`;
-            devHtml += `<div style="color:#fff;font-weight:bold;">Prompt ${cacheEntry.resolved.promptIndex}</div>`;
-            const allMatched = [...cacheEntry.resolved.characters, ...cacheEntry.resolved.backgrounds, ...cacheEntry.resolved.props];
-            if (allMatched.length > 0) {
-                allMatched.forEach(m => { devHtml += `<div style="color:#28a745">✓ ${m}</div>`; });
-            } else {
-                devHtml += `<div style="color:#999">No assets</div>`;
-            }
-            devHtml += `</div>`;
-        }
-    }
-
-    if (window.DEBUG_MODE === true && window.__saMetrics) {
-        window.__saMetrics.parseTime = (performance.now() - parseStart).toFixed(2);
-        window.__saMetrics.resolveTime = resolveDuration.toFixed(2);
+        devHtml += `</div>`;
     }
     
     const devContent = document.getElementById('sa-dev-content');
@@ -422,104 +373,31 @@ async function executePipeline(e, fullText, index) {
         devContent.innerHTML = devHtml;
     }
 
-    // Goal 1: Populate structured FIFO upload queue. Avoid duplicates or re-enqueueing.
-    for (let pIdx = 0; pIdx < prompts.length; pIdx++) {
-        const pText = prompts[pIdx];
-        const cacheEntry = window.__saPromptCache.get(pText);
-        if (cacheEntry && cacheEntry.resolved.fileObjects.length > 0) {
-            if (!cacheEntry.uploaded && !cacheEntry.uploading) {
-                const alreadyQueued = window.__saUploadQueue.some(job => job.promptText === pText);
-                if (!alreadyQueued) {
-                    cacheEntry.uploading = true;
-                    // Goal 4: Track queue wait duration in DEBUG_MODE
-                    const queueJob = {
-                        promptText: pText,
-                        promptIndex: cacheEntry.resolved.promptIndex,
-                        fileObjects: cacheEntry.resolved.fileObjects,
-                        files: cacheEntry.resolved.files,
-                        characters: cacheEntry.resolved.characters,
-                        backgrounds: cacheEntry.resolved.backgrounds,
-                        props: cacheEntry.resolved.props,
-                        enqueuedAt: window.DEBUG_MODE === true ? performance.now() : 0
-                    };
-                    window.__saUploadQueue.push(queueJob);
-                }
-            }
-        }
-    }
-
-    // Start consuming the queue asynchronously in a safe FIFO loop
-    processUploadQueue();
-}
-
-async function processUploadQueue() {
-    if (isProcessingQueue) return;
-    isProcessingQueue = true;
-
-    while (window.__saUploadQueue.length > 0) {
-        const job = window.__saUploadQueue[0]; // Peek at FIFO head
-        const cacheEntry = window.__saPromptCache.get(job.promptText);
-
-        // If the prompt was deleted from the active cache during typing, discard the job
-        if (!cacheEntry) {
-            window.__saUploadQueue.shift();
-            continue;
-        }
-
-        if (!cacheEntry.uploaded) {
+    // Upload Phase
+    for (let pIdx = 0; pIdx < window.__saResolvedAssets.length; pIdx++) {
+        const pObj = window.__saResolvedAssets[pIdx];
+        if (pObj.fileObjects.length > 0) {
             if (typeof window.__saUploadHandler === 'function') {
-                const uploadStart = window.DEBUG_MODE === true ? performance.now() : 0;
-                
                 try {
-                    // Goal 4: Measure queue wait time in DEBUG_MODE
-                    if (window.DEBUG_MODE === true && window.__saMetrics) {
-                        const waitTime = performance.now() - job.enqueuedAt;
-                        window.__saMetrics.queueWaitTime = waitTime.toFixed(2);
-                    }
-
-                    await window.__saUploadHandler({
-                        target: { files: job.fileObjects },
-                        preventDefault: () => {},
-                        stopPropagation: () => {}
-                    });
-
-                    cacheEntry.uploaded = true;
-                    window.__saLastUpload = job.files;
-
-                    const historyEntry = {
-                        promptIndex: job.promptIndex,
-                        promptText: job.promptText,
-                        characters: job.characters,
-                        backgrounds: job.backgrounds,
-                        props: job.props,
-                        files: job.files,
-                        modelValueLength: job.files.length,
+                    await window.__saUploadHandler({ target: { files: pObj.fileObjects }, preventDefault: ()=>{}, stopPropagation: ()=>{} });
+                    window.__saLastUpload = pObj.files;
+                    
+                    window.__saUploadHistory.push({
+                        promptIndex: pObj.promptIndex,
+                        promptText: pObj.promptText,
+                        characters: pObj.characters,
+                        backgrounds: pObj.backgrounds,
+                        props: pObj.props,
+                        files: pObj.files,
+                        modelValueLength: pObj.files.length,
                         assignedImageCount: window.__saAttachedCharacters.size,
                         timestamp: new Date().toISOString()
-                    };
+                    });
                     
-                    window.__saUploadHistory.push(historyEntry);
-
-                    // Goal 5: Maintain strictly bounded history queue
-                    if (window.__saUploadHistory.length > 50) {
-                        window.__saUploadHistory.shift();
-                    }
-
                 } catch (err) {
-                    console.error(`Upload Failed for Prompt ${job.promptIndex}`, err);
-                } finally {
-                    if (window.DEBUG_MODE === true && window.__saMetrics) {
-                        const duration = performance.now() - uploadStart;
-                        window.__saMetrics.uploadTime = duration.toFixed(2);
-                    }
+                    console.error(`Upload Failed for Prompt ${pObj.promptIndex}`, err);
                 }
             }
         }
-
-        // Dequeue task (FIFO progression)
-        window.__saUploadQueue.shift();
-        cacheEntry.uploading = false;
     }
-
-    isProcessingQueue = false;
 }
