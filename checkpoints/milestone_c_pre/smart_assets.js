@@ -21,17 +21,134 @@ window.__saMetrics = {
 
 // Diagnostics, validations, wrappers and dashboards are bound strictly to DEBUG_MODE (Goal 4 & Safe Mode)
 if (window.DEBUG_MODE === true) {
-    const debugScripts = [
-        '../../../debug/debug_api.js',
-        '../../../debug/runtime_validator.js',
-        '../../../debug/live_metrics.js'
-    ];
-    debugScripts.forEach(src => {
-        const s = document.createElement('script');
-        s.src = src;
-        s.type = 'module';
-        document.body.appendChild(s);
+    // 1. Memory Monitor
+    setInterval(() => {
+        if (performance && performance.memory) {
+            window.__saMetrics.memoryUsed = (performance.memory.usedJSHeapSize / 1024 / 1024).toFixed(2) + ' MB';
+        }
+    }, 1000);
+
+    // 2. Duplicate Listener Detector
+    const _originalAddEventListener = EventTarget.prototype.addEventListener;
+    EventTarget.prototype.addEventListener = function(type, listener, options) {
+        if (['keyup', 'keydown', 'input', 'change'].includes(type)) {
+            window.__saMetrics.listenerCount++;
+            if (this.tagName === 'TEXTAREA' && this._registeredListeners && this._registeredListeners[type]) {
+                console.warn(`[RUNTIME VALIDATION FAILED] Duplicate listener detected for ${type} on Textarea!`);
+            }
+            if (this.tagName === 'TEXTAREA') {
+                this._registeredListeners = this._registeredListeners || {};
+                this._registeredListeners[type] = true;
+            }
+        }
+        return _originalAddEventListener.apply(this, arguments);
+    };
+
+    // 3. __saUploadHandler Tracer (Proxies timing metadata directly to diagnostics)
+    let _originalUploadHandler = null;
+    Object.defineProperty(window, '__saUploadHandler', {
+        get() {
+            return async function(eventArgs) {
+                if (!_originalUploadHandler) {
+                    console.warn("[RUNTIME VALIDATION FAILED] __saUploadHandler called but original is null");
+                    return;
+                }
+                
+                const startTime = performance.now();
+                const timestamp = new Date().toISOString();
+                const files = eventArgs?.target?.files || [];
+                const filesList = Array.from(files).map(f => f.name).join(', ');
+                
+                if (files.length === 0) {
+                    console.warn("[RUNTIME VALIDATION FAILED] Empty upload detected");
+                }
+                
+                let promptIndex = "Unknown";
+                if (window.__saResolvedAssets && window.__saResolvedAssets.length > 0) {
+                    const match = window.__saResolvedAssets.find(p => p.fileObjects && p.fileObjects.some(f => filesList.includes(f.name)));
+                    if (match) promptIndex = match.promptIndex;
+                }
+
+                console.log("----------------------------------");
+                console.log("UPLOAD START");
+                console.log(`Timestamp: ${timestamp}`);
+                console.log(`Prompt Index: ${promptIndex}`);
+                console.log(`Files: ${filesList}`);
+                console.log(`ModelValue Before: ${window.__saUploadHistory ? window.__saUploadHistory.length : 0}`);
+                
+                let result;
+                try {
+                    result = await _originalUploadHandler.apply(this, arguments);
+                } catch(e) {
+                    console.error("Upload Failed", e);
+                }
+                
+                const duration = performance.now() - startTime;
+                window.__saMetrics.uploadTime = duration.toFixed(2);
+                
+                console.log(`ModelValue After: ${window.__saUploadHistory ? window.__saUploadHistory.length : 0}`);
+                console.log(`Duration: ${duration.toFixed(2)} ms`);
+                console.log("UPLOAD END");
+                console.log("----------------------------------");
+                
+                return result;
+            };
+        },
+        set(val) {
+            if (typeof val === 'function') {
+                _originalUploadHandler = val;
+            }
+        },
+        configurable: true
     });
+
+    // 4. Runtime Validator (Continuous integrity check)
+    setInterval(() => {
+        let failed = false;
+        let reason = "";
+        if (window.__saResolvedAssets) {
+            window.__saResolvedAssets.forEach(p => {
+                if (p.files && p.files.includes(undefined)) {
+                    failed = true; reason = "Undefined assets found in prompt";
+                }
+                if (p.files && new Set(p.files).size !== p.files.length) {
+                    failed = true; reason = "Duplicate files found in prompt resolve";
+                }
+            });
+        }
+        if (failed) {
+            console.warn(`[RUNTIME VALIDATION FAILED] ${reason}`);
+        }
+    }, 2000);
+
+    // 5. Live Metrics Dashboard UI Panel
+    const saMetricsPanel = document.createElement('div');
+    saMetricsPanel.id = "sa-metrics-panel";
+    saMetricsPanel.style.position = "fixed";
+    saMetricsPanel.style.top = "20px";
+    saMetricsPanel.style.right = "20px";
+    saMetricsPanel.style.backgroundColor = "rgba(0,0,255,0.8)";
+    saMetricsPanel.style.color = "white";
+    saMetricsPanel.style.padding = "10px";
+    saMetricsPanel.style.zIndex = "999999";
+    saMetricsPanel.style.pointerEvents = "none";
+    document.body.appendChild(saMetricsPanel);
+
+    setInterval(() => {
+        if (window.__saUploadQueue) {
+            window.__saMetrics.queueLength = window.__saUploadQueue.length;
+        }
+        saMetricsPanel.innerHTML = `
+            <b>LIVE METRICS</b><br>
+            Parse: ${window.__saMetrics.parseTime}ms<br>
+            Resolve: ${window.__saMetrics.resolveTime}ms<br>
+            Upload: ${window.__saMetrics.uploadTime}ms<br>
+            Queue Wait: ${window.__saMetrics.queueWaitTime || 0}ms<br>
+            Queue Length: ${window.__saMetrics.queueLength}<br>
+            Listeners: ${window.__saMetrics.listenerCount}<br>
+            Memory: ${window.__saMetrics.memoryUsed || 'N/A'}
+        `;
+    }, 1000);
 }
 
 // ==========================================
