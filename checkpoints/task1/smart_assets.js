@@ -254,17 +254,13 @@ document.addEventListener('keydown', (e) => {
     }
 }, true);
 
-let lastText = "";
-let debounceTimeout = null;
-
-document.addEventListener('keyup', (e) => {
+document.addEventListener('keyup', async (e) => {
     if (e.target.tagName !== 'TEXTAREA') return;
     if (['ArrowDown', 'ArrowUp', 'Enter', 'Tab', 'Escape'].includes(e.key) && acState.active) return;
     
     const fullText = e.target.value;
-    
-    // Autocomplete dropdown UI processing (executed immediately for responsive UX)
     const index = window.smartAssetIndex || { characters: {}, backgrounds: {}, props: {} };
+    
     const currentWord = fullText.substring(0, e.target.selectionStart).split(/\s+/).pop();
     if (currentWord.startsWith('@')) {
         acState.active = true;
@@ -277,24 +273,6 @@ document.addEventListener('keyup', (e) => {
         acState.items = items; acState.selectedIndex = 0; renderAutocomplete();
     } else { closeAutocomplete(); }
 
-    // Execution pipeline: Debounced in DEBUG_MODE; immediate in production (DEBUG_MODE=false)
-    if (window.DEBUG_MODE === true) {
-        if (debounceTimeout) {
-            clearTimeout(debounceTimeout);
-        }
-        debounceTimeout = setTimeout(() => {
-            executePipeline(e, fullText, index);
-        }, 300);
-    } else {
-        // Immediate execution on text change (0 background-timer overhead)
-        if (fullText !== lastText) {
-            lastText = fullText;
-            executePipeline(e, fullText, index);
-        }
-    }
-});
-
-async function executePipeline(e, fullText, index) {
     const prompts = fullText.split(/\n\s*\n/).map(s => s.trim()).filter(s => s.length > 0);
     
     // Clear out for this session
@@ -368,10 +346,7 @@ async function executePipeline(e, fullText, index) {
         devHtml += `</div>`;
     }
     
-    const devContent = document.getElementById('sa-dev-content');
-    if (devContent) {
-        devContent.innerHTML = devHtml;
-    }
+    document.getElementById('sa-dev-content').innerHTML = devHtml;
 
     // Upload Phase
     for (let pIdx = 0; pIdx < window.__saResolvedAssets.length; pIdx++) {
@@ -389,7 +364,7 @@ async function executePipeline(e, fullText, index) {
                         backgrounds: pObj.backgrounds,
                         props: pObj.props,
                         files: pObj.files,
-                        modelValueLength: pObj.files.length,
+                        modelValueLength: pObj.files.length, // estimated internally
                         assignedImageCount: window.__saAttachedCharacters.size,
                         timestamp: new Date().toISOString()
                     });
@@ -400,4 +375,4 @@ async function executePipeline(e, fullText, index) {
             }
         }
     }
-}
+});
