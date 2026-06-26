@@ -1,0 +1,61 @@
+{
+   "action": {
+      "default_title": "Workflow Automation Clean"
+   },
+   "background": {
+      "service_worker": "service-worker-loader.js",
+      "type": "module"
+   },
+   "content_scripts": [
+      {
+         "all_frames": false,
+         "js": [
+            "assets/index.ts-CjccIiMW.js"
+         ],
+         "matches": [
+            "*://labs.google/*"
+         ],
+         "run_at": "document_end"
+      }
+   ],
+   "description": "Batch generate and auto-download videos and images on Google Flow.",
+   "host_permissions": [
+      "*://labs.google/*"
+   ],
+   "icons": {
+      "128": "src/assets/logo.png",
+      "16": "src/assets/logo.png",
+      "24": "src/assets/logo.png",
+      "32": "src/assets/logo.png"
+   },
+   "manifest_version": 3,
+   "name": "Workflow Automation Clean",
+   "offline_enabled": true,
+   "permissions": [
+      "storage",
+      "tabs",
+      "background",
+      "sidePanel",
+      "activeTab",
+      "downloads",
+      "debugger",
+      "cookies"
+   ],
+   "side_panel": {
+      "default_path": "src/ui/side-panel/index.html"
+   },
+   "version": "2.0.0",
+   "version_name": "2.0.0-clean",
+   "web_accessible_resources": [
+      {
+         "matches": [
+            "*://labs.google/*"
+         ],
+         "resources": [
+            "assets/catchUploadFile.ts-DJwIizxX.js",
+            "assets/index.ts-CjccIiMW.js"
+         ],
+         "use_dynamic_url": false
+      }
+   ]
+}

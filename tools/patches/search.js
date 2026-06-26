@@ -1,0 +1,1 @@
+﻿const fs = require('fs'); const txt = fs.readFileSync('C:/chorome_extention/reference/location/clean_extension/assets/index.html-B3dstwmb.js', 'utf8'); const matches = [...txt.matchAll(/__name:'([^']*)'/g)].concat([...txt.matchAll(/__name:\x22([^\x22]*)\x22/g)]); matches.forEach(m => { if(m[1].includes('Image')) console.log(m[1]); });
